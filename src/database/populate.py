@@ -296,28 +296,37 @@ class CSVDatabaseSeeder:
                 print("Rolling back existing transaction.")
                 await self._db_session.rollback()
 
+            # 1️⃣ Seed user groups
             await self._seed_user_groups()
 
+            # 2️⃣ Preprocess CSV
             data = self._preprocess_csv()
 
+            # 3️⃣ Prepare reference data (countries, genres, actors, languages)
             country_map, genre_map, actor_map, language_map = await self._prepare_reference_data(data)
 
+            # 4️⃣ Prepare movies data
             movies_data = self._prepare_movies_data(data, country_map)
 
-            result = await self._db_session.execute(
-                insert(MovieModel).returning(MovieModel.id),
-                movies_data
-            )
-            movie_ids = list(result.scalars().all())
+            # 5️⃣ Insert movies
+            await self._db_session.execute(insert(MovieModel).values(movies_data))
+            await self._db_session.flush()  # <- Генерує id для нових записів
 
+            # 6️⃣ Отримати id всіх вставлених фільмів
+            result = await self._db_session.execute(select(MovieModel.id).order_by(MovieModel.id))
+            movie_ids = result.scalars().all()
+
+            # 7️⃣ Prepare associations
             movie_genres_data, movie_actors_data, movie_languages_data = self._prepare_associations(
                 data, movie_ids, genre_map, actor_map, language_map
             )
 
+            # 8️⃣ Bulk insert associations
             await self._bulk_insert(MoviesGenresModel, movie_genres_data)
             await self._bulk_insert(ActorsMoviesModel, movie_actors_data)
             await self._bulk_insert(MoviesLanguagesModel, movie_languages_data)
 
+            # 9️⃣ Commit transaction
             await self._db_session.commit()
             print("Seeding completed.")
 
